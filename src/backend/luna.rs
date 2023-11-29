@@ -15,8 +15,8 @@ use rusb::{
 const VID: u16 = 0x1d50;
 const PID: u16 = 0x615b;
 
-const MIN_SUPPORTED: Version = Version(0, 0, 2);
-const NOT_SUPPORTED: Version = Version(0, 0, 3);
+const MIN_SUPPORTED: Version = Version(0, 0, 3);
+const NOT_SUPPORTED: Version = Version(0, 0, 4);
 
 const ENDPOINT: u8 = 0x81;
 
@@ -269,12 +269,18 @@ impl PacketQueue {
             return None;
         }
         let packet_len = u16::from_be_bytes([self.buffer[0], self.buffer[1]]) as usize;
-        if buffer_len <= 2 + packet_len {
+        if buffer_len <= 2 + packet_len + (packet_len % 2) {
             return None;
         }
 
         self.buffer.drain(0..2);
 
-        Some(self.buffer.drain(0..packet_len).collect())
+        let packet = self.buffer.drain(0..packet_len).collect();
+
+        if packet_len % 2 != 0 {
+            self.buffer.drain(0..1);
+        }
+
+        Some(packet)
     }
 }
