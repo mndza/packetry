@@ -820,8 +820,9 @@ pub fn start_luna() -> Result<(), PacketryError> {
             display_error(stop_luna()));
         let read_luna = move || {
             let mut decoder = Decoder::new(writer)?;
-            while let Some(packet) = stream_handle.next() {
-                decoder.handle_raw_packet(&packet?)?;
+            while let Some(result) = stream_handle.next() {
+                let packet = result?;
+                decoder.handle_raw_packet(&packet.bytes)?;
             }
             decoder.finish()?;
             Ok(())

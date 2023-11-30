@@ -15,8 +15,8 @@ use rusb::{
 const VID: u16 = 0x1d50;
 const PID: u16 = 0x615b;
 
-const MIN_SUPPORTED: Version = Version(0, 0, 3);
-const NOT_SUPPORTED: Version = Version(0, 0, 4);
+const MIN_SUPPORTED: Version = Version(0, 0, 4);
+const NOT_SUPPORTED: Version = Version(0, 0, 5);
 
 const ENDPOINT: u8 = 0x81;
 
@@ -97,7 +97,7 @@ pub struct LunaHandle {
 }
 
 pub struct LunaStream {
-    receiver: Receiver<Result<Vec<u8>, Error>>,
+    receiver: Receiver<Result<Packet, Error>>,
 }
 
 pub struct LunaStop {
@@ -234,7 +234,7 @@ impl LunaHandle {
 }
 
 impl LunaStream {
-    pub fn next(&mut self) -> Option<Result<Vec<u8>, Error>> {
+    pub fn next(&mut self) -> Option<Result<Packet, Error>> {
         self.receiver.recv().ok()
     }
 }
@@ -246,6 +246,11 @@ impl LunaStop {
         self.stop_request.send(()).or(Err(ChannelSend))?;
         self.worker.join().or(Err(ThreadPanic))?
     }
+}
+
+pub struct Packet {
+    pub clk_cycles: u16,
+    pub bytes: Vec<u8>,
 }
 
 struct PacketQueue {
@@ -263,24 +268,26 @@ impl PacketQueue {
         self.buffer.extend(slice.iter());
     }
 
-    pub fn next(&mut self) -> Option<Vec<u8>> {
+    pub fn next(&mut self) -> Option<Packet> {
         let buffer_len = self.buffer.len();
         if buffer_len <= 2 {
             return None;
         }
         let packet_len = u16::from_be_bytes([self.buffer[0], self.buffer[1]]) as usize;
-        if buffer_len <= 2 + packet_len + (packet_len % 2) {
+        if buffer_len <= 4 + packet_len + (packet_len % 2) {
             return None;
         }
 
-        self.buffer.drain(0..2);
+        let clk_cycles = u16::from_be_bytes([self.buffer[2], self.buffer[3]]);
 
-        let packet = self.buffer.drain(0..packet_len).collect();
+        self.buffer.drain(0..4);
+
+        let bytes = self.buffer.drain(0..packet_len).collect();
 
         if packet_len % 2 != 0 {
             self.buffer.drain(0..1);
         }
 
-        Some(packet)
+        Some(Packet{clk_cycles, bytes})
     }
 }
