@@ -42,6 +42,7 @@ use gtk::{
 use pcap_file::{
     PcapError,
     DataLink,
+    TsResolution,
     pcap::{PcapReader, PcapWriter, PcapHeader, RawPcapPacket},
 };
 
@@ -697,6 +698,10 @@ fn start_pcap(action: FileAction, path: PathBuf) -> Result<(), PacketryError> {
                 TOTAL.store(file_size, Ordering::Relaxed);
                 let reader = BufReader::new(file);
                 let mut pcap = PcapReader::new(reader)?;
+                let frac_ns = match pcap.header().ts_resolution {
+                    TsResolution::MicroSecond => 1_000,
+                    TsResolution::NanoSecond => 1,
+                };
                 let mut bytes_read = size_of::<PcapHeader>() as u64;
                 let mut decoder = Decoder::new(writer.unwrap())?;
                 #[cfg(feature="step-decoder")]
@@ -708,9 +713,12 @@ fn start_pcap(action: FileAction, path: PathBuf) -> Result<(), PacketryError> {
                         client.read(&mut buf).unwrap();
                     };
                     let packet = result?;
+                    let timestamp =
+                        packet.ts_sec as u64 * 1_000_000_000 +
+                        packet.ts_frac as u64 * frac_ns;
                     #[cfg(feature="record-ui-test")]
                     let guard = UPDATE_LOCK.lock();
-                    decoder.handle_raw_packet(&packet.data)?;
+                    decoder.handle_raw_packet(&packet.data, timestamp)?;
                     #[cfg(feature="record-ui-test")]
                     drop(guard);
                     let size = 16 + packet.data.len();
@@ -732,19 +740,21 @@ fn start_pcap(action: FileAction, path: PathBuf) -> Result<(), PacketryError> {
                 let writer = BufWriter::new(file);
                 let header = PcapHeader {
                     datalink: DataLink::USB_2_0,
+                    ts_resolution: TsResolution::NanoSecond,
                     .. PcapHeader::default()
                 };
                 let mut pcap = PcapWriter::with_header(writer, header)?;
                 for i in 0..packet_count {
                     let packet_id = PacketId::from(i);
                     let bytes = capture.packet(packet_id)?;
+                    let timestamp = capture.packet_time(packet_id)?;
                     let length: u32 = bytes
                         .len()
                         .try_into()
                         .or_bug("Packet too large for pcap file")?;
                     let packet = RawPcapPacket {
-                        ts_sec: 0,
-                        ts_frac: 0,
+                        ts_sec: (timestamp / 1_000_000_000) as u32,
+                        ts_frac: (timestamp % 1_000_000_000) as u32,
                         incl_len: length,
                         orig_len: length,
                         data: Cow::from(bytes)
@@ -805,6 +815,14 @@ fn detect_hardware() -> Result<(), PacketryError> {
     })
 }
 
+/// Convert 60MHz clock cycles to nanoseconds.
+fn clk_to_ns(clk_cycles: u64) -> u64 {
+    const TABLE: [u64; 3] = [0, 16, 33];
+    let quotient = clk_cycles / 3;
+    let remainder = clk_cycles % 3;
+    return quotient * 50 + TABLE[remainder as usize];
+}
+
 pub fn start_luna() -> Result<(), PacketryError> { 
     let writer = reset_capture()?;
     with_ui(|ui| {
@@ -820,9 +838,11 @@ pub fn start_luna() -> Result<(), PacketryError> {
             display_error(stop_luna()));
         let read_luna = move || {
             let mut decoder = Decoder::new(writer)?;
+            let mut timestamp = 0u64;
             while let Some(result) = stream_handle.next() {
                 let packet = result?;
-                decoder.handle_raw_packet(&packet.bytes)?;
+                timestamp += clk_to_ns(packet.clk_cycles as u64);
+                decoder.handle_raw_packet(&packet.bytes, timestamp)?;
             }
             decoder.finish()?;
             Ok(())
