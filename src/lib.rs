@@ -6,6 +6,7 @@ mod capture;
 mod compact_index;
 mod data_stream;
 pub mod decoder;
+mod error;
 mod expander;
 mod id;
 mod index_stream;

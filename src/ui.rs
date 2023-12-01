@@ -41,27 +41,25 @@ use gtk::{
 };
 
 use pcap_file::{
-    PcapError,
     DataLink,
     TsResolution,
     pcap::{PcapReader, PcapWriter, PcapHeader, RawPcapPacket},
 };
 
 use rusb::Context;
-use thiserror::Error;
 
 use crate::backend::luna::{LunaDevice, LunaHandle, LunaStop, Speed};
 use crate::capture::{
     create_capture,
     CaptureReader,
     CaptureWriter,
-    CaptureError,
     ItemSource,
     TrafficItem,
     DeviceItem,
     PacketId,
 };
 use crate::decoder::Decoder;
+use crate::error::{PacketryError, OrBug};
 use crate::expander::ExpanderWrapper;
 use crate::model::{GenericModel, TrafficModel, DeviceModel};
 use crate::row_data::{
@@ -69,7 +67,6 @@ use crate::row_data::{
     ToGenericRowData,
     TrafficRowData,
     DeviceRowData};
-use crate::tree_list_model::ModelError;
 use crate::util::{fmt_count, fmt_size};
 
 #[cfg(any(feature="test-ui-replay", feature="record-ui-test"))]
@@ -95,28 +92,6 @@ thread_local!(
 enum FileAction {
     Load,
     Save,
-}
-
-#[derive(Error, Debug)]
-pub enum PacketryError {
-    #[error("capture data error: {0}")]
-    Capture(#[from] CaptureError),
-    #[error("tree model error: {0}")]
-    Model(#[from] ModelError),
-    #[error("I/O error: {0}")]
-    Io(#[from] std::io::Error),
-    #[error("pcap error: {0}")]
-    Pcap(#[from] PcapError),
-    #[error(transparent)]
-    Usb(#[from] rusb::Error),
-    #[error("device not found")]
-    NotFound,
-    #[error("LUNA error: {0}")]
-    Luna(#[from] crate::backend::luna::Error),
-    #[error("locking failed")]
-    Lock,
-    #[error("internal bug: {0}")]
-    Bug(&'static str)
 }
 
 struct DeviceSelector {
@@ -956,20 +931,4 @@ pub fn display_error(result: Result<(), PacketryError>) {
     }
     #[cfg(feature="test-ui-replay")]
     result.unwrap();
-}
-
-trait OrBug<T> {
-    fn or_bug(self, msg: &'static str) -> Result<T, PacketryError>;
-}
-
-impl<T> OrBug<T> for Option<T> {
-    fn or_bug(self, msg: &'static str) -> Result<T, PacketryError> {
-        self.ok_or(PacketryError::Bug(msg))
-    }
-}
-
-impl<T, E> OrBug<T> for Result<T, E> {
-    fn or_bug(self, msg: &'static str) -> Result<T, PacketryError> {
-        self.or(Err(PacketryError::Bug(msg)))
-    }
 }
