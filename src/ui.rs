@@ -21,7 +21,8 @@ use gtk::{
     DropDown,
     Label,
     ListItem,
-    ListView,
+    ColumnView,
+    ColumnViewColumn,
     ProgressBar,
     ScrolledWindow,
     Separator,
@@ -408,10 +409,11 @@ pub fn activate(application: &Application) -> Result<(), PacketryError> {
 }
 
 fn create_view<Item, Model, RowData>(
+        title: &str,
         capture: &CaptureReader,
         #[cfg(any(feature="test-ui-replay", feature="record-ui-test"))]
         recording_args: (&Rc<RefCell<Recording>>, &'static str))
-    -> (Model, ListView)
+    -> (Model, ColumnView)
     where
         Item: Copy + 'static,
         Model: GenericModel<Item> + IsA<ListModel> + IsA<Object>,
@@ -520,7 +522,10 @@ fn create_view<Item, Model, RowData>(
     factory.connect_bind(move |_, item| display_error(bind(item)));
     factory.connect_unbind(move |_, item| display_error(unbind(item)));
 
-    let view = ListView::new(Some(&selection_model), Some(&factory));
+    let view = ColumnView::new(Some(&selection_model));
+    let column = ColumnViewColumn::new(Some(title), Some(&factory));
+    view.append_column(&column);
+    view.add_css_class("data-table");
 
     #[cfg(any(feature="test-ui-replay", feature="record-ui-test"))]
     model.connect_items_changed(move |model, position, removed, added|
@@ -535,12 +540,14 @@ pub fn reset_capture() -> Result<CaptureWriter, PacketryError> {
     with_ui(|ui| {
         let (traffic_model, traffic_view) =
             create_view::<TrafficItem, TrafficModel, TrafficRowData>(
+                "Traffic",
                 &reader,
                 #[cfg(any(feature="test-ui-replay", feature="record-ui-test"))]
                 (&ui.recording, "traffic")
             );
         let (device_model, device_view) =
             create_view::<DeviceItem, DeviceModel, DeviceRowData>(
+                "Devices",
                 &reader,
                 #[cfg(any(feature="test-ui-replay", feature="record-ui-test"))]
                 (&ui.recording, "devices")
