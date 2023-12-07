@@ -15,8 +15,8 @@ use rusb::{
 const VID: u16 = 0x1d50;
 const PID: u16 = 0x615b;
 
-const MIN_SUPPORTED: Version = Version(0, 0, 4);
-const NOT_SUPPORTED: Version = Version(0, 0, 5);
+const MIN_SUPPORTED: Version = Version(0, 0, 5);
+const NOT_SUPPORTED: Version = Version(0, 0, 6);
 
 const ENDPOINT: u8 = 0x81;
 
@@ -272,29 +272,64 @@ impl PacketQueue {
 
     pub fn next(&mut self) -> Option<Packet> {
         let buffer_len = self.buffer.len();
+
+        // Check whether full event code or packet length is available yet.
         if buffer_len <= 2 {
             return None;
         }
-        let packet_len = u16::from_be_bytes([self.buffer[0], self.buffer[1]]) as usize;
-        if buffer_len <= 4 + packet_len + (packet_len % 2) {
-            return None;
+
+        if self.buffer[0] == 0xFF {
+            // This is an event.
+            let _event_code = self.buffer[1];
+
+            // Check whether full event is available yet.
+            if buffer_len < 4 {
+                return None;
+            }
+
+            // Read clock cycles since last event or packet.
+            let clk_cycles = u16::from_be_bytes([self.buffer[2], self.buffer[3]]);
+
+            // Update total cycle count.
+            self.total_cycles += clk_cycles as u64;
+
+            // Take event from buffer.
+            self.buffer.drain(0..4);
+
+            // No packet to return.
+            None
+        } else {
+            // This is a packet. Read packet length.
+            let packet_len = u16::from_be_bytes([self.buffer[0], self.buffer[1]]) as usize;
+
+            // Check whether full packet is available yet.
+            if buffer_len <= 4 + packet_len + (packet_len % 2) {
+                return None;
+            }
+
+            // Read clock cycle count.
+            let clk_cycles = u16::from_be_bytes([self.buffer[2], self.buffer[3]]);
+
+            // Update total cycle count.
+            self.total_cycles += clk_cycles as u64;
+
+            // Take header from buffer.
+            self.buffer.drain(0..4);
+
+            // Take packet bytes from buffer.
+            let bytes = self.buffer.drain(0..packet_len).collect();
+
+            // If packet length was odd, take padding byte.
+            if packet_len % 2 != 0 {
+                self.buffer.drain(0..1);
+            }
+
+            // Calculate current timestamp.
+            let timestamp = clk_to_ns(self.total_cycles);
+
+            // Return packet.
+            Some(Packet{timestamp, bytes})
         }
-
-        let clk_cycles = u16::from_be_bytes([self.buffer[2], self.buffer[3]]);
-
-        self.buffer.drain(0..4);
-
-        let bytes = self.buffer.drain(0..packet_len).collect();
-
-        if packet_len % 2 != 0 {
-            self.buffer.drain(0..1);
-        }
-
-        self.total_cycles += clk_cycles as u64;
-
-        let timestamp = clk_to_ns(self.total_cycles);
-
-        Some(Packet{timestamp, bytes})
     }
 }
 
