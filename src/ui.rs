@@ -824,14 +824,6 @@ fn detect_hardware() -> Result<(), PacketryError> {
     })
 }
 
-/// Convert 60MHz clock cycles to nanoseconds.
-fn clk_to_ns(clk_cycles: u64) -> u64 {
-    const TABLE: [u64; 3] = [0, 16, 33];
-    let quotient = clk_cycles / 3;
-    let remainder = clk_cycles % 3;
-    return quotient * 50 + TABLE[remainder as usize];
-}
-
 pub fn start_luna() -> Result<(), PacketryError> { 
     let writer = reset_capture()?;
     with_ui(|ui| {
@@ -847,11 +839,9 @@ pub fn start_luna() -> Result<(), PacketryError> {
             display_error(stop_luna()));
         let read_luna = move || {
             let mut decoder = Decoder::new(writer)?;
-            let mut timestamp = 0u64;
             while let Some(result) = stream_handle.next() {
                 let packet = result?;
-                timestamp += clk_to_ns(packet.clk_cycles as u64);
-                decoder.handle_raw_packet(&packet.bytes, timestamp)?;
+                decoder.handle_raw_packet(&packet.bytes, packet.timestamp)?;
             }
             decoder.finish()?;
             Ok(())

@@ -249,18 +249,20 @@ impl LunaStop {
 }
 
 pub struct Packet {
-    pub clk_cycles: u16,
+    pub timestamp: u64,
     pub bytes: Vec<u8>,
 }
 
 struct PacketQueue {
     buffer: VecDeque<u8>,
+    total_cycles: u64,
 }
 
 impl PacketQueue {
     pub fn new() -> Self {
         PacketQueue {
             buffer: VecDeque::new(),
+            total_cycles: 0,
         }
     }
 
@@ -288,6 +290,17 @@ impl PacketQueue {
             self.buffer.drain(0..1);
         }
 
-        Some(Packet{clk_cycles, bytes})
+        self.total_cycles += clk_cycles as u64;
+
+        let timestamp = clk_to_ns(self.total_cycles);
+
+        Some(Packet{timestamp, bytes})
     }
+}
+
+fn clk_to_ns(clk_cycles: u64) -> u64 {
+    const TABLE: [u64; 3] = [0, 16, 33];
+    let quotient = clk_cycles / 3;
+    let remainder = clk_cycles % 3;
+    return quotient * 50 + TABLE[remainder as usize];
 }
